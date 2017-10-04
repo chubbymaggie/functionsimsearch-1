@@ -18,36 +18,27 @@
 
 #include "CodeObject.h"
 #include "InstructionDecoder.h"
-#include "third_party/PicoSHA2/picosha2.h"
 
 #include "disassembly.hpp"
+#include "dyninstfeaturegenerator.hpp"
 #include "flowgraph.hpp"
 #include "flowgraphutil.hpp"
-#include "functionminhash.hpp"
-#include "minhashsearchindex.hpp"
+#include "functionsimhash.hpp"
+#include "simhashsearchindex.hpp"
 #include "pecodesource.hpp"
 #include "threadpool.hpp"
+#include "util.hpp"
 
 using namespace std;
 using namespace Dyninst;
 using namespace ParseAPI;
 using namespace InstructionAPI;
 
-// Obtain the first 64 bits of the input file's SHA256 hash.
-uint64_t GenerateExecutableID(const std::string& filename) {
-  std::ifstream ifs(filename.c_str(), std::ios::binary);
-  std::vector<unsigned char> hash(32);
-  picosha2::hash256(std::istreambuf_iterator<char>(ifs),
-      std::istreambuf_iterator<char>(), hash.begin(), hash.end());
-
-  uint64_t *temp = reinterpret_cast<uint64_t*>(&hash[0]);
-  return __builtin_bswap64(*temp);
-}
-
 int main(int argc, char** argv) {
   if (argc != 5) {
-    printf("Adds minhash vectors from a binary to a search index\n");
-    printf("Usage: %s <PE/ELF> <binary path> <index file> <minimum function size>\n", argv[0]);
+    printf("Adds simhash vectors from a binary to a search index\n");
+    printf("Usage: %s <PE/ELF> <binary path> <index file> "
+      "<minimum function size>\n", argv[0]);
     return -1;
   }
 
@@ -57,10 +48,10 @@ int main(int argc, char** argv) {
   uint64_t minimum_size = strtoul(argv[4], nullptr, 10);
 
   uint64_t file_id = GenerateExecutableID(binary_path_string);
-  printf("[!] Executable id is %lx\n", file_id);
+  printf("[!] Executable id is %16.16lx\n", file_id);
 
   // Load the search index.
-  MinHashSearchIndex search_index(index_file, false);
+  SimHashSearchIndex search_index(index_file, false);
 
   Disassembly disassembly(mode, binary_path_string);
   if (!disassembly.Load()) {
@@ -81,10 +72,11 @@ int main(int argc, char** argv) {
   std::atomic_ulong atomic_processed_functions(0);
   std::atomic_ulong* processed_functions = &atomic_processed_functions;
   uint64_t number_of_functions = functions.size();
+  FunctionSimHasher hasher("weights.txt");
 
   for (Function* function : functions) {
     pool.Push(
-      [&search_index, mutex_pointer, &binary_path_string,
+      [&search_index, mutex_pointer, &binary_path_string, &hasher,
       processed_functions, file_id, function, minimum_size,
       number_of_functions](int threadid) {
       Flowgraph graph;
@@ -95,30 +87,39 @@ int main(int argc, char** argv) {
       uint64_t branching_nodes = graph.GetNumberOfBranchingNodes();
 
       if (branching_nodes <= minimum_size) {
-        printf("[!] (%lu/%lu) %s FileID %lx: Skipping function %lx, only %lu branching nodes\n",
-          processed_functions->load(), number_of_functions,
+        printf("[!] (%lu/%lu) %s FileID %lx: Skipping function %lx, only %lu "
+          "branching nodes\n", processed_functions->load(), number_of_functions,
           binary_path_string.c_str(), file_id, function_address, branching_nodes);
         return;
       }
       if (search_index.GetIndexFileFreeSpace() < (1ULL << 14)) {
-        printf("[!] (%lu/%lu) %s FileID %lx: Skipping function %lx. Index file full.\n",
-          processed_functions->load(), number_of_functions,
+        printf("[!] (%lu/%lu) %s FileID %lx: Skipping function %lx. Index file "
+          "full.\n", processed_functions->load(), number_of_functions,
           binary_path_string.c_str(), file_id, function_address);
         return;
       }
 
-      std::vector<uint32_t> minhash_vector;
-      printf("[!] (%lu/%lu) %s FileID %lx: Adding function %lx (%lu branching nodes)\n",
-        processed_functions->load(), number_of_functions,
+      printf("[!] (%lu/%lu) %s FileID %lx: Adding function %lx (%lu branching "
+        "nodes)\n", processed_functions->load(), number_of_functions,
         binary_path_string.c_str(), file_id, function_address, branching_nodes);
 
-      CalculateFunctionFingerprint(function, 200, 200, 32, &minhash_vector);
+      std::vector<uint64_t> hashes;
+      // Access to the DynInst API which happens inside the constructor of the
+      // generator needs to be synchronized.
+      mutex_pointer->lock();
+      DyninstFeatureGenerator generator(function);
+      mutex_pointer->unlock();
+
+      hasher.CalculateFunctionSimHash(&generator, 128, &hashes);
+      uint64_t hash_A = hashes[0];
+      uint64_t hash_B = hashes[1];
       {
         std::lock_guard<std::mutex> lock(*mutex_pointer);
         try {
-          search_index.AddFunction(minhash_vector, file_id, function_address);
+          search_index.AddFunction(hash_A, hash_B, file_id, function_address);
         } catch (boost::interprocess::bad_alloc& out_of_space) {
-          printf("[!] boost::interprocess::bad_alloc - no space in index file left!\n");
+          printf("[!] boost::interprocess::bad_alloc - no space in index file "
+            "left!\n");
         }
       }
     });

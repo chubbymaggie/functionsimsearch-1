@@ -37,13 +37,13 @@ Disassembly::~Disassembly() {
     SymtabCodeSource* symtab_code_source =
       static_cast<SymtabCodeSource*>(code_source_);
     delete symtab_code_source;
-  } else {
+  } else if (type_ == "PE") {
     PECodeSource* pe_code_source = static_cast<PECodeSource*>(code_source_);
     delete pe_code_source;
   }
 }
 
-bool Disassembly::Load() {
+bool Disassembly::Load(bool perform_parsing) {
   Instruction::Ptr instruction;
 
   if (type_ == "ELF") {
@@ -65,17 +65,27 @@ bool Disassembly::Load() {
       return false;
     }
     code_source_ = static_cast<CodeSource*>(pe_code_source);
+  } else {
+    printf("Error: Unknown filetype specified.\n");
+    return false;
   }
 
   code_object_ = new CodeObject(code_source_);
 
-  // Parse the obvious function entries.
-  code_object_->parse();
+  if (perform_parsing) {
+    // Parse the obvious function entries.
+    code_object_->parse();
 
-  // Parse the gaps.
-  for (CodeRegion* region : code_source_->regions()) {
-    code_object_->parseGaps(region, GapParsingType::IdiomMatching);
-    code_object_->parseGaps(region, GapParsingType::PreambleMatching);
+    // Parse the gaps.
+    for (CodeRegion* region : code_source_->regions()) {
+      code_object_->parseGaps(region, GapParsingType::IdiomMatching);
+      code_object_->parseGaps(region, GapParsingType::PreambleMatching);
+    }
   }
   return true;
 }
+
+void Disassembly::DisassembleFromAddress(uint64_t address, bool recursive) {
+  code_object_->parse(address, recursive);
+}
+

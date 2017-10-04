@@ -20,7 +20,7 @@
 class PECodeRegion : public Dyninst::ParseAPI::CodeRegion {
 public:
   PECodeRegion(uint8_t* buffer, size_t length, Dyninst::Address section_base, 
-    const std::string& name);
+    const std::string& name, bool is_amd64);
   ~PECodeRegion();
 
   Dyninst::Address low() const { return base_; }
@@ -72,7 +72,7 @@ public:
 private:
   bool is_code_ = true;
   bool is_data_ = false;
-  bool is_read_only_ = false;
+  bool is_read_only_ = true;
   bool is_64_bit_ = false;
   uint64_t base_;
   size_t size_;
@@ -98,9 +98,11 @@ public:
   Dyninst::Architecture getArch() const;
 
   bool parsed() const { return parsed_; }
+  bool isAmd64() const { return is_amd64_; }
 private:
   Dyninst::ParseAPI::CodeRegion* getRegion(const Dyninst::Address addr) const;
   bool parsed_ = false;
+  bool is_amd64_ = false;
 };
 
 #endif // PECODESOURCE_HPP

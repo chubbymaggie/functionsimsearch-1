@@ -18,6 +18,7 @@
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/containers/map.hpp>
 #include <boost/interprocess/containers/set.hpp>
+#include <boost/interprocess/containers/string.hpp>
 #include <boost/interprocess/containers/vector.hpp>
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/managed_mapped_file.hpp>
@@ -25,6 +26,12 @@
 #include <utility>
 
 using namespace boost::interprocess;
+
+// From the boost documentation.
+typedef allocator<char, managed_mapped_file::segment_manager> CharAllocator;
+typedef basic_string<char, std::char_traits<char>, CharAllocator> MyShmString;
+typedef allocator<MyShmString, managed_mapped_file::segment_manager>
+  StringAllocator;
 
 template <typename ValueType>
 class PersistentVector {
@@ -58,7 +65,6 @@ private:
   PersistentVectorAllocator allocator_;
   vector<ValueType, PersistentVectorAllocator>* vector_;
 };
-
 
 template <typename ValueType>
 class PersistentSet {
@@ -105,7 +111,8 @@ public:
   PersistentMap(const std::string& filename, bool create) :
     filename_(filename),
     mapname_("map"),
-    segment_(new managed_mapped_file(open_or_create, filename.c_str(), 1ul << 30)),
+    segment_(new managed_mapped_file(open_or_create, filename.c_str(),
+      1ul << 24)),
     allocator_(segment_->get_segment_manager()) {
     Init(create);
   }

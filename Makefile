@@ -1,51 +1,60 @@
 CPP = g++
-CPPFLAGS = -ggdb -O3 -std=c++11 
+CPPFLAGS += -ggdb -O3 -std=c++11 -D_DEBUG -fPIE
 LIBDIR = -L./third_party/pe-parse/parser-library -L./third_party/libdwarf/libdwarf
+INCLUDEDIR = -Ithird_party/spii/include -Ithird_party/spii/thirdparty/Eigen
 LIBS = -lparseAPI -linstructionAPI -lsymtabAPI -lsymLite -ldynDwarf -ldynElf \
-       -lcommon -lelf -ldwarf -lpthread -lpe-parser-library
+       -lcommon -lelf -ldwarf -lpthread -lpe-parser-library -lspii
 
-OBJ = disassembly.o pecodesource.o flowgraph.o flowgraphutil.o \
-      functionminhash.o minhashsearchindex.o
+OBJ = build/util.o build/disassembly.o build/pecodesource.o build/flowgraph.o \
+      build/flowgraphutil.o build/functionsimhash.o \
+      build/simhashsearchindex.o build/bitpermutation.o \
+      build/threadtimer.o build/functionmetadata.o \
+      build/simhashtrainer.o build/sgdsolver.o build/dyninstfeaturegenerator.o \
+      build/trainingdata.o
 
-ALL = disassemble dotgraphs graphhashes addfunctionstoindex createfunctionindex\
-      matchfunctionsfromindex dumpfunctionindexinfo growfunctionindex
+ALL = bin/disassemble bin/dotgraphs bin/graphhashes bin/addfunctionstoindex \
+      bin/addsinglefunctiontoindex \
+      bin/createfunctionindex bin/functionfingerprints \
+      bin/matchfunctionsfromindex bin/dumpfunctionindexinfo \
+      bin/growfunctionindex bin/dumpfunctionindex \
+      bin/trainsimhashweights bin/dumpsinglefunctionfeatures \
+      bin/evalsimhashweights
 
-%.o: %.cpp
-	$(CPP) -c -o $@ $< $(CPPFLAGS)
+TESTS = build/bitpermutation_test.o build/simhashsearchindex_test.o \
+        build/sgdsolver_test.o build/testutil.o \
+        build/functionsimhash_test.o
 
-all: $(ALL)
+SLOWTESTS = build/simhashtrainer_test.o build/testutil.o
 
-disassemble: $(OBJ)
-	$(CPP) $(CPPFLAGS) -o disassemble disassemble.cpp $(OBJ) \
-		$(LIBDIR) $(LIBS)
+DIRECTORIES = directory/build directory/bin directory/tests directory/profile
 
-dotgraphs: dotgraphs.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o dotgraphs dotgraphs.cpp $(OBJ) $(LIBDIR) $(LIBS)
+TEST = tests/runtests
 
-graphhashes: graphhashes.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o graphhashes graphhashes.cpp $(OBJ) $(LIBDIR) $(LIBS)
+SLOWTEST = tests/slowtests
 
-createfunctionindex: createfunctionindex.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o createfunctionindex createfunctionindex.cpp $(OBJ) \
-	$(LIBDIR) $(LIBS)
+directory/%:
+	mkdir -p $(@F)
 
-addfunctionstoindex: addfunctionstoindex.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o addfunctionstoindex addfunctionstoindex.cpp $(OBJ) \
-	$(LIBDIR) $(LIBS)
+build/%.o: %.cpp $(DIRECTORIES)
+	$(CPP) $(INCLUDEDIR) -c -o $@ $< $(CPPFLAGS)
 
-matchfunctionsfromindex: matchfunctionsfromindex.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o matchfunctionsfromindex matchfunctionsfromindex.cpp $(OBJ) \
-	$(LIBDIR) $(LIBS)
+all: $(ALL) $(TESTS) $(SLOWTESTS) $(TEST) $(SLOWTEST)
 
-dumpfunctionindexinfo: dumpfunctionindexinfo.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o dumpfunctionindexinfo dumpfunctionindexinfo.cpp $(OBJ) \
-	$(LIBDIR) $(LIBS)
+tests/runtests: $(TESTS) tests
 
-growfunctionindex: growfunctionindex.cpp $(OBJ)
-	$(CPP) $(CPPFLAGS) -o growfunctionindex growfunctionindex.cpp $(OBJ) \
-	$(LIBDIR) $(LIBS)
+tests/slowtests: $(SLOWTESTS) slowtests
 
+slowtests: $(ALL) $(OBJ) $(SLOWTESTS)
+	$(CPP) $(CPPFLAGS) -o tests/slowtests runtests.cpp $(OBJ) $(SLOWTESTS) \
+		$(LIBDIR) $(LIBS) -lgtest
+
+tests: $(ALL) $(OBJ) $(TESTS)
+	$(CPP) $(CPPFLAGS) -o tests/runtests runtests.cpp $(OBJ) $(TESTS) $(LIBDIR) \
+		$(LIBS) -lgtest
+
+bin/%: $(OBJ)
+	$(CPP) $(INCLUDEDIR) $(CPPFLAGS) -o $@ $(@F).cpp $(OBJ) $(LIBDIR) $(LIBS)
 
 clean:
-	rm ./*.o $(ALL)
+	rm -f ./build/*.o ./tests/* $(ALL)
 

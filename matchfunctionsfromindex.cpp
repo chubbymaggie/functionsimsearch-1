@@ -18,35 +18,49 @@
 
 #include "CodeObject.h"
 #include "InstructionDecoder.h"
-#include "third_party/PicoSHA2/picosha2.h"
 
 #include "disassembly.hpp"
+#include "dyninstfeaturegenerator.hpp"
 #include "flowgraph.hpp"
 #include "flowgraphutil.hpp"
-#include "functionminhash.hpp"
-#include "minhashsearchindex.hpp"
+#include "functionsimhash.hpp"
+#include "functionmetadata.hpp"
+#include "simhashsearchindex.hpp"
 #include "pecodesource.hpp"
 #include "threadpool.hpp"
+#include "util.hpp"
 
 using namespace std;
 using namespace Dyninst;
 using namespace ParseAPI;
 using namespace InstructionAPI;
 
-// Obtain the first 64 bits of the input file's SHA256 hash.
-uint64_t GenerateExecutableID(const std::string& filename) {
-  std::ifstream ifs(filename.c_str(), std::ios::binary);
-  std::vector<unsigned char> hash(32);
-  picosha2::hash256(std::istreambuf_iterator<char>(ifs),
-      std::istreambuf_iterator<char>(), hash.begin(), hash.end());
-
-  uint64_t *temp = reinterpret_cast<uint64_t*>(&hash[0]);
-  return __builtin_bswap64(*temp);
-}
+// Simple POD class to aggregate the information from a given search.
+class SearchResult {
+public:
+  SearchResult() {};
+  SearchResult(SimHashSearchIndex::FileID source,
+    Address source_address, uint32_t index,
+    uint32_t source_function_bnodes, float similarity,
+    SimHashSearchIndex::FileID match,
+    Address match_address) :
+    source_file_(source), source_function_(source_address),
+    source_function_index_(index),
+    source_function_bnodes_(source_function_bnodes),
+    similarity_(similarity), matching_file_(match),
+    matching_function_(match_address) {};
+  SimHashSearchIndex::FileID source_file_;
+  Address source_function_;
+  uint32_t source_function_index_;
+  uint32_t source_function_bnodes_; // Number of branching nodes in source.
+  float similarity_;
+  SimHashSearchIndex::FileID matching_file_;
+  Address matching_function_;
+};
 
 int main(int argc, char** argv) {
   if (argc != 7) {
-    printf("Match minhash vectors from a binary against a search index\n");
+    printf("Match simhashes from a binary against a search index\n");
     printf("Usage: %s <PE/ELF> <binary path> <index file> <minimum function size> <max_matches> <minimum_percentage>\n", argv[0]);
     return -1;
   }
@@ -59,10 +73,13 @@ int main(int argc, char** argv) {
   float minimum_percentage = strtod(argv[6], nullptr);
 
   uint64_t file_id = GenerateExecutableID(binary_path_string);
-  printf("[!] Executable id is %lx\n", file_id);
+  printf("[!] Executable id is %16.16lx\n", file_id);
+
+  // Load the metadata file.
+  FunctionMetadataStore metadata(index_file + ".meta");
 
   // Load the search index.
-  MinHashSearchIndex search_index(index_file, false);
+  SimHashSearchIndex search_index(index_file, false);
 
   printf("[!] Loaded search index, starting disassembly.\n");
 
@@ -82,19 +99,20 @@ int main(int argc, char** argv) {
   printf("[!] Done disassembling, beginning search.\n");
   Instruction::Ptr instruction;
 
-  threadpool::SynchronizedQueue<
-    std::tuple<Address, float, MinHashSearchIndex::FileAndAddress>> resultqueue;
+  threadpool::SynchronizedQueue<SearchResult> resultqueue;
   threadpool::ThreadPool pool(std::thread::hardware_concurrency());
   std::atomic_ulong atomic_processed_functions(0);
   std::atomic_ulong* processed_functions = &atomic_processed_functions;
   uint64_t number_of_functions = functions.size();
+  FunctionSimHasher hasher("weights.txt");
 
   // Push the consumer thread into the threadpool.
   for (Function* function : functions) {
     // Push the producer threads into the threadpool.
     pool.Push(
-      [&resultqueue, &search_index, processed_functions, file_id, function,
-      minimum_size, max_matches, minimum_percentage, number_of_functions]
+      [&resultqueue, &search_index, &metadata, processed_functions, file_id,
+      function, minimum_size, max_matches, minimum_percentage,
+      number_of_functions, &hasher]
         (int threadid) {
       Flowgraph graph;
       Address function_address = function->addr();
@@ -107,26 +125,50 @@ int main(int argc, char** argv) {
        return;
       }
 
-      std::vector<uint32_t> minhash_vector;
-      CalculateFunctionFingerprint(function, 200, 200, 32, &minhash_vector);
+      std::vector<uint64_t> hashes;
 
-      std::vector<std::pair<float, MinHashSearchIndex::FileAndAddress>> results;
+      // TODO(thomasdullien): Investigate if we need locking for the constructor
+      // of the DyninstFeatureGenerator.
+      DyninstFeatureGenerator generator(function);
+      hasher.CalculateFunctionSimHash(&generator, 128, &hashes);
+      uint64_t hash_A = hashes[0];
+      uint64_t hash_B = hashes[1];
+
+      std::vector<std::pair<float, SimHashSearchIndex::FileAndAddress>> results;
       search_index.QueryTopN(
-        minhash_vector, max_matches, &results);
+        hash_A, hash_B, max_matches, &results);
       for (const auto& result : results) {
         if (result.first > minimum_percentage) {
-          resultqueue.Push(std::make_tuple(
-            function_address, result.first, 
-            result.second));
-
-            printf("[!] (%lu/%lu) %f: %lx.%lx (%lu branching nodes) matches %lx.%lx \n",
-              processed_functions->load(), number_of_functions, result.first,
-              file_id, function_address, branching_nodes, result.second.first,
-              result.second.second);
+          resultqueue.Push(
+            SearchResult(file_id, function_address,
+              processed_functions->load(), branching_nodes, result.first,
+              result.second.first, result.second.second));
         }
       }
     });
   }
-  // Process all the things.
+
+  // Run as long as there is still work to do in the pool.
+  while (!pool.AllIdle()) {
+    SearchResult result;
+    if (resultqueue.Pop(result)) {
+      printf("[!] (%lu/%lu - %d branching nodes) %f: %lx.%lx matches "
+        "%lx.%lx ", result.source_function_index_, number_of_functions,
+        result.source_function_bnodes_, result.similarity_,
+        result.source_file_, result.source_function_,
+        result.matching_file_, result.matching_function_);
+
+      std::string function_name;
+      std::string file_name;
+      if (metadata.GetFileName(result.matching_file_, &file_name)) {
+        printf("%s ", file_name.c_str());
+      }
+      if (metadata.GetFunctionName(result.matching_file_,
+        result.matching_function_, &function_name)) {
+        printf("%s ", function_name.c_str());
+      }
+      printf("\n");
+    }
+  }
   pool.Stop(true);
 }
