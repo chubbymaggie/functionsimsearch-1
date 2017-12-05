@@ -1,9 +1,9 @@
 CPP = g++
 CPPFLAGS += -ggdb -O3 -std=c++11 -D_DEBUG -fPIE
-LIBDIR = -L./third_party/pe-parse/parser-library -L./third_party/libdwarf/libdwarf
+LIBDIR = -L./third_party/pe-parse/pe-parser-library -L./third_party/libdwarf/libdwarf
 INCLUDEDIR = -Ithird_party/spii/include -Ithird_party/spii/thirdparty/Eigen
 LIBS = -lparseAPI -linstructionAPI -lsymtabAPI -lsymLite -ldynDwarf -ldynElf \
-       -lcommon -lelf -ldwarf -lpthread -lpe-parser-library -lspii
+       -lcommon -lelf -ldwarf -lpthread -lpe-parser-library -lspii -lgflags
 
 OBJ = build/util.o build/disassembly.o build/pecodesource.o build/flowgraph.o \
       build/flowgraphutil.o build/functionsimhash.o \
@@ -18,7 +18,7 @@ ALL = bin/disassemble bin/dotgraphs bin/graphhashes bin/addfunctionstoindex \
       bin/matchfunctionsfromindex bin/dumpfunctionindexinfo \
       bin/growfunctionindex bin/dumpfunctionindex \
       bin/trainsimhashweights bin/dumpsinglefunctionfeatures \
-      bin/evalsimhashweights
+      bin/evalsimhashweights bin/stemsymbol
 
 TESTS = build/bitpermutation_test.o build/simhashsearchindex_test.o \
         build/sgdsolver_test.o build/testutil.o \
