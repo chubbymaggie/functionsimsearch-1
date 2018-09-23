@@ -1,7 +1,7 @@
-FROM ubuntu:xenial
+FROM ubuntu:bionic
 
 RUN apt-get update
-RUN apt-get install -y git wget cmake gcc build-essential
+RUN apt-get install -y git wget cmake gcc build-essential libz-dev
 # some deps via: https://github.com/richinseattle/Dockerfiles/blob/master/afl-dyninst.Dockerfile
 RUN apt-get install -y libelf-dev libelf1 libiberty-dev libboost-all-dev libgtest-dev libgflags-dev
 RUN mkdir /code
@@ -29,13 +29,11 @@ RUN cd /usr/src/gtest && \
 RUN cd /code && \
     git clone https://github.com/google/functionsimsearch.git && \
     cd functionsimsearch && \
-    mv third_party third_party_temp && \
     mkdir third_party && \
     cd third_party && \
     git clone https://github.com/okdshin/PicoSHA2.git && \
     git clone https://github.com/trailofbits/pe-parse.git && \
     git clone https://github.com/PetterS/spii.git && \
-    cp -R ../third_party_temp/* ./ && \
     cd pe-parse && \
     cmake -D CMAKE_CXX_FLAGS=-Wstrict-overflow=1 . && \
     sed -i -e 's/overflow\=5/overflow\=1/g' ./cmake/compilation_flags.cmake && \
@@ -48,6 +46,10 @@ RUN cd /code && \
     cp /usr/local/lib/libspii* /usr/lib && \
     cd ../.. && \
     sed -i -e 's/isnan/std::isnan/g' ./third_party/spii/include/spii/large_auto_diff_term.h && \
+    cd third_party && \
+    mkdir json && mkdir json/src && cd json/src && \
+    wget https://github.com/nlohmann/json/releases/download/v3.1.2/json.hpp && \
+    cd ../../.. && \
     make -j 16
 
 # dispatch via entrypoint script

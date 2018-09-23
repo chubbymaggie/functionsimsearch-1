@@ -14,7 +14,7 @@ docker build -t functionsimsearch .
 After the container is built, you can run all relevant commands by doing
 ```bash
 sudo docker run -it --rm -v $(pwd):/pwd functionsimsearch COMMAND ARGUMENTS_TO_COMMAND
-sudo docker run -it --rm -v $(pwd):/pwd functionsimsearch disassemble ELF /pwd/elf_file
+sudo docker run -it --rm -v $(pwd):/pwd functionsimsearch disassemble --format=ELF --input=/bin/tar
 ```
 
 The last command should dump the disassembly of ./elf_file to stdout.
@@ -33,39 +33,75 @@ This code has a few external dependencies. The dependencies are:
   - PE-parse, a C++ PE parser: https://github.com/trailofbits/pe-parse.git
   - PicoSHA2, a C++ SHA256 hash library: https://github.com/okdshin/PicoSHA2.git
   - SPII, a C++ library for automatic differentiation & optimization: https://github.com/PetterS/spii.git
+  - JSON.hpp, a C++ library for using JSON: https://github.com/nlohmann/json.git
   - GoogleTest, a C++ unit testing library
   - GFlags, a C++ library for handling command line parameters
 
 ### Installing
 
-You should be able to build the code by doing the following:
+You should be able to build on a Debian stretch machine by running the following
+bash script in the directory where you checked out everything:
 
-1. Download, build and install DynInst 9.3. This may involve building boost from
-   source inside the DynInst directory tree (at least it did for me), and building
-   libdwarf from scratch.
-2. Get the dependencies:
 ```bash
+./build_dependencies.sh
+```
+
+The script does the following:
+
+```bash
+#!/bin/bash
+source_dir=$(pwd)
+
 # Install gtest and gflags. It's a bit fidgety, but works:
-sudo apt-get install libgtest-dev libgflags-dev cmake
+sudo apt-get install libgtest-dev libgflags-dev libz-dev libelf-dev cmake g++
+sudo apt-get install libboost-system-dev libboost-date-time-dev libboost-thread-dev
 cd /usr/src/gtest
 sudo cmake CMakeLists
 sudo make
 sudo cp *.a /usr/lib
-# Now get the other dependencies
+
+# Now get and the other dependencies
+cd $source_dir
 mkdir third_party
 cd third_party
+
+# Download Dyninst.
+wget https://github.com/dyninst/dyninst/archive/v9.3.2.tar.gz
+tar xvf ./v9.3.2.tar.gz
+# Download PicoSHA, pe-parse, SPII and the C++ JSON library.
 git clone https://github.com/okdshin/PicoSHA2.git
 git clone https://github.com/trailofbits/pe-parse.git
 git clone https://github.com/PetterS/spii.git
-cd pe-parse
-cmake ./CMakeLists
-make
-cd ..
-cd spii
-cmake ./CMakeLists
-make
+mkdir json
+mkdir json/src
+cd json/src
+wget https://github.com/nlohmann/json/releases/download/v3.1.2/json.hpp 
 cd ../..
-make
+
+# Build PE-Parse.
+cd pe-parse
+cmake ./CMakeLists.txt
+make -j8
+cd ..
+
+# Build SPII.
+cd spii
+cmake ./CMakeLists.txt
+make -j8
+sudo make install
+cd ..
+
+# Build Dyninst
+cd dyninst-9.3.2
+cmake ./CMakeLists.txt
+make -j8
+sudo make install
+sudo ldconfig
+cd ..
+
+# Finally build functionsimsearch tools
+cd ..
+make -j8
 ```
 This should build the relevant executables to try. On Debian stretch and later,
 you may have to add '-fPIC' into the pe-parse CMakeLists.txt to make sure your
@@ -438,6 +474,42 @@ multiplot> unset multiplot
 
 ```
 
+## Compiling the same debian package with many compilers/settings
+
+For all experiments with this codebase, it is often useful to be able to compile
+a given codebase with a number of different compilers and compiler settings. This
+is often complicated, though, by various Makefiles and build scripts ignoring
+flags provided to them by debuild, or alternatively, by clang ignoring all but
+the last -Ox argument. The following is a quick guide on how to rebuild a given
+Debian package with a number of different compiler settings.
+
+* Install https://github.com/gawen947/gcc-wrapper -- this is a simple bash
+  wrapper for GCC and G++ which will replace -Ox arguments in the command line.
+* Build a number of configurations for different compilers in your ~/.config/gcc-wrapper directory
+* Get the source code for the package using apt-get source.
+
+Once you have all this, you can change to the source directory and issue the
+following command:
+
+```bash
+
+directory=$(pwd|rev|cut -d"/" -f1|rev); for config in $(ls ~/.config/gcc-wrapper/); do config=$(echo $config|rev|cut -d"/" -f1|rev); DEB_BUILD_OPTIONS="nostrip" debuild --set-envvar=GCC_PROFIL=$config -b -us -uc -j36; cd ..; mkdir $(echo $directory).$config; mv ./*.deb $(echo $directory).$config; cd $directory; done
+```
+
+This should take every compiler configuration that you have in your gcc-wrapper
+directory, and rebuild the package with this compiler configuration. The results
+will be placed in the corresponding subdirectory.
+
+Once this is done, you can run the following command to gather all the .so's in
+the packages, label them properly, and put them in the right directory:
+
+
+```bash
+# Start one level up from the source directory!
+for i in $(find -iname *.deb); do config=$(echo $i | cut -d"/" -f2); mkdir temp; mkdir temp/$config; dpkg -x $i ./temp/$config; done
+mkdir result_sos
+for so in $(find -iname *.so); do config=$(echo $so | cut -d"/" -f3); filename=$(echo $so | rev | cut -d"/" -f1| rev); cp $so ./result_sos/$(echo $filename).$config; done
+```
 
 ## Built With
 
