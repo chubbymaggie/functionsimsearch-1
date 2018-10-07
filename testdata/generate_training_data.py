@@ -53,6 +53,9 @@ flags.DEFINE_integer('max_seen_training_samples', 500000, "Maximum number of " +
   "pairs to generate for the 'seen' case. This may be needed if you are " +
   "training on lots of data at once and fear running out of memory.")
 
+flags.DEFINE_integer('parallelism', 8, "Number of parallel invocations of " +
+  "the disassembly tools. Given that one disassembly operation can eat up to " +
+  "12GB of RAM for large executables, this is heavily RAM-bound.")
 #=============================================================================
 
 FLAGS = flags.FLAGS
@@ -231,7 +234,7 @@ def ProcessTrainingFiles(training_files, file_format):
     file_id = sha256sum[0:16].decode("utf-8")
     argument_tuples.append((training_file, file_id, file_format))
   # Use a quarter of the available cores.
-  pool = multiprocessing.Pool(max(1, int(multiprocessing.cpu_count() / 8)))
+  pool = multiprocessing.Pool(max(1, int(FLAGS.parallelism)))
   if FLAGS.generate_fingerprints:
     print("Running functionfingerprints on all files.")
     pool.map(RunFunctionFingerprints, argument_tuples)
@@ -489,11 +492,15 @@ def WriteSeenTrainingAndValidationData(symbol_to_file_and_address, FLAGS):
   training_attraction_set = set()
   validation_attraction_set = set()
   for function_family, elements in symbol_to_file_and_address.items():
+    # Pick a random element from the family.
     validation_element = random.choice(elements)
+    # Take the remaining members of the function family.
     training_elements = [ x for x in elements if x != validation_element ]
+    # Take all the pairs of elements for the function family \ validation_element
     training_attraction_set.update(
       [ (x, y) for x in training_elements for y in training_elements if
         x < y ])
+    # The second element of the tuple is the validation_element.
     validation_attraction_set.update(
       [ (x, y) for x in training_elements for y in [validation_element] ])
   print("'Seen' case: Got %d training pairs, %d validation pairs" %
@@ -529,7 +536,7 @@ def WriteSeenTrainingAndValidationData(symbol_to_file_and_address, FLAGS):
   WritePairsFile( validation_repulsion_set,
     FLAGS.work_directory + "validation_data_seen/repulse.txt" )
   WriteFunctionsTxt( FLAGS.work_directory + "/validation_data_seen" )
-  WriteFunctionsTxt( FLAGS.work_directory + "/training_data_unseen" )
+  WriteFunctionsTxt( FLAGS.work_directory + "/training_data_seen" )
 
 
 def main(argv):

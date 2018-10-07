@@ -153,7 +153,7 @@ def save_function(function_address=None):
     executable_id, ida_nalt.get_input_file_path(), address, function_name))
   return True
 
-def load_function(function_address = None):
+def load_function(function_address = None, minimum=0):
   search_index
   sim_hasher
   meta_data
@@ -170,12 +170,12 @@ def load_function(function_address = None):
   print_separator = False
   for result in results:
     same_bits = result[0]
+    if same_bits < minimum:
+      continue
     result_exe_id = result[1]
     result_address = result[2]
     odds = 0.0
     odds = search_index.odds_of_random_hit(same_bits)
-    if odds < 20000:
-      continue
     print_separator = True
     if not meta_data.has_key((result_exe_id, result_address)):
       print("%lx:%lx %lx-%lx Result is %f - %lx:%lx (1 in %f searches)" %
@@ -195,7 +195,7 @@ def match_all_functions():
   search_index
   sim_hasher
   for function in Functions(MinEA(), MaxEA()):
-    load_function(function_address=function)
+    load_function(function_address=function, minimum=100)
 
 import ida_idp
 processor_to_call_instructions = { "arm" : "FOO", "pc" : "call" }
@@ -209,7 +209,6 @@ hotkey_mappings = {
 }
 
 hotkey_contexts = []
-
 
 try:
   hotkey_context_S
@@ -245,6 +244,10 @@ try:
 
   search_index
   sim_hasher
+  # Deleting the search index and simhashes is necessary to make sure the C++
+  # destructors get called and the memory-mapped file that provides the search
+  # index gets unmapped cleanly. This is mainly useful to make sure that the
+  # DB can be safely unmapped from IDA (and then modified / grown).
   del search_index
   del sim_hasher
 except:
@@ -289,11 +292,12 @@ except:
       print("%lx:%lx" %i )
   else:
     meta_data = {}
-  print("Calling functionsimsearch.SimHashSearchIndex(\"%s\", %s, 50)" % (
-    index_file, create_index))
+  number_of_buckets = 50
+  print("Calling functionsimsearch.SimHashSearchIndex(\"%s\", %s, %d)" % (
+    index_file, create_index, number_of_buckets))
   try:
     search_index = functionsimsearch.SimHashSearchIndex(index_file,
-      create_index, 50)
+      create_index, number_of_buckets)
     if os.path.isfile(weights_file):
       print("Calling functionsimsearch.SimHasher(\"%s\")" % weights_file)
       sim_hasher = functionsimsearch.SimHasher(weights_file)

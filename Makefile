@@ -8,6 +8,7 @@ LIBS = -lparseAPI -linstructionAPI -lsymtabAPI -lsymLite -ldynDwarf -ldynElf \
 OBJ = build/util.o build/util_with_dyninst.o build/disassembly.o \
       build/pecodesource.o build/flowgraph.o \
       build/flowgraphwithinstructions.o \
+      build/flowgraphwithinstructionsfeaturegenerator.o \
       build/buffertokeniterator.o \
       build/flowgraphutil.o build/flowgraphutil_dyninst.o \
       build/functionsimhash.o \
@@ -15,7 +16,7 @@ OBJ = build/util.o build/util_with_dyninst.o build/disassembly.o \
       build/simhashsearchindex.o build/bitpermutation.o \
       build/threadtimer.o build/functionmetadata.o \
       build/mappedtextfile.o \
-      build/simhashtrainer.o build/sgdsolver.o build/dyninstfeaturegenerator.o \
+      build/simhashtrainer.o build/sgdsolver.o \
       build/trainingdata.o build/cppsplitter.o
 
 
@@ -31,7 +32,6 @@ ALL = bin/disassemble bin/dotgraphs bin/graphhashes bin/addfunctionstoindex \
 TESTS = build/bitpermutation_test.o \
         build/simhashsearchindex_test.o \
         build/flowgraphwithinstructions_test.o \
-        build/disassembly_test.o \
         build/testutil.o \
         build/functionsimhash_test.o \
         build/buffertokeniterator_test.o build/mappedtextfile_test.o \
